@@ -1,5 +1,4 @@
 import { execFileSync } from 'node:child_process';
-import { existsSync, rmSync } from 'node:fs';
 import path from 'node:path';
 
 import { PrismaClient } from '@prisma/client';
@@ -23,41 +22,35 @@ import { PrismaSyncObservabilityService } from '../src/modules/sync/prisma-sync-
 import { SyncService } from '../src/modules/sync/sync.service.js';
 import { PrismaUsersService } from '../src/modules/users/prisma-users.service.js';
 
-describe('prisma catalog persistence', () => {
-  const databaseName = `prisma-catalog-test-${process.pid}-${Date.now()}.db`;
-  const databasePath = path.join(process.cwd(), 'prisma', databaseName);
-  const databaseUrl = `file:${databasePath.replace(/\\/g, '/')}`;
+const describeWithPostgres = describe.skipIf(
+  process.env.TEST_DATABASE_URL == null,
+);
+
+describeWithPostgres('prisma catalog persistence', () => {
+  const databaseUrl = process.env.TEST_DATABASE_URL ?? '';
   const previousDatabaseUrl = process.env.DATABASE_URL;
   let prisma: PrismaClient;
 
   beforeAll(async () => {
     process.env.DATABASE_URL = databaseUrl;
-    prisma = new PrismaClient();
-
-    const sql = execFileSync(
+    execFileSync(
       process.execPath,
       [
         path.join(process.cwd(), 'node_modules', 'prisma', 'build', 'index.js'),
-        'migrate',
-        'diff',
-        '--from-empty',
-        '--to-schema-datamodel',
-        path.join('prisma', 'schema.prisma'),
-        '--script',
+        'db',
+        'push',
+        '--force-reset',
+        '--accept-data-loss',
+        '--skip-generate',
       ],
       {
         cwd: process.cwd(),
         env: { ...process.env, DATABASE_URL: databaseUrl },
-        encoding: 'utf8',
+        stdio: 'inherit',
       },
     );
 
-    for (const statement of sql
-      .split(/;\s*(?:\r?\n|$)/)
-      .map((entry) => entry.trim())
-      .filter(Boolean)) {
-      await prisma.$executeRawUnsafe(statement);
-    }
+    prisma = new PrismaClient();
   }, 30000);
 
   afterAll(async () => {
@@ -68,15 +61,9 @@ describe('prisma catalog persistence', () => {
       process.env.DATABASE_URL = previousDatabaseUrl;
     }
 
-    for (const suffix of ['', '-journal', '-wal', '-shm']) {
-      const candidate = `${databasePath}${suffix}`;
-      if (existsSync(candidate)) {
-        rmSync(candidate, { force: true });
-      }
-    }
   }, 30000);
 
-  it('persists catalog entities and builds sale snapshots from SQLite', async () => {
+  it('persists catalog entities and builds sale snapshots from PostgreSQL', async () => {
     const service = new PrismaCatalogService(prisma);
 
     const initialCategories = await service.listCategories('company_tatuzin');

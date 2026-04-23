@@ -1,4 +1,23 @@
 services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: tatuzin-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:?POSTGRES_DB precisa estar no backend/.env.production}
+      POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER precisa estar no backend/.env.production}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD precisa estar no backend/.env.production}
+    volumes:
+      - tatuzin_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    networks:
+      - tatuzin_net
+
   backend:
     build:
       context: .
@@ -7,10 +26,11 @@ services:
     restart: unless-stopped
     env_file:
       - backend/.env.production
-    volumes:
-      - tatuzin_sqlite:/app/data
-    expose:
-      - "3333"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:3333:3333"
     healthcheck:
       test:
         [
@@ -26,27 +46,8 @@ services:
     networks:
       - tatuzin_net
 
-  caddy:
-    image: caddy:2-alpine
-    container_name: tatuzin-caddy
-    restart: unless-stopped
-    depends_on:
-      backend:
-        condition: service_healthy
-    ports:
-      - "80:80"
-      - "443:443"
-    volumes:
-      - ./infra/Caddyfile:/etc/caddy/Caddyfile:ro
-      - caddy_data:/data
-      - caddy_config:/config
-    networks:
-      - tatuzin_net
-
 volumes:
-  tatuzin_sqlite:
-  caddy_data:
-  caddy_config:
+  tatuzin_postgres_data:
 
 networks:
   tatuzin_net:

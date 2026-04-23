@@ -6,6 +6,13 @@ const defaultJwtSecrets = new Set<string>([
   'tatuzin-refresh-secret',
 ]);
 
+const unsafeSecretFragments = [
+  'troque-por-um-segredo',
+  'change-me',
+  'changeme',
+  'example',
+];
+
 export function validateRuntimeEnvironment(): void {
   const persistenceMode = resolvePersistenceMode();
 
@@ -19,6 +26,7 @@ export function validateRuntimeEnvironment(): void {
     return;
   }
 
+  validateProductionDatabaseUrl(persistenceMode);
   validateProductionSecret('JWT_ACCESS_SECRET');
   validateProductionSecret('JWT_REFRESH_SECRET');
 }
@@ -59,5 +67,39 @@ function validateProductionSecret(name: string): void {
 
   if (defaultJwtSecrets.has(value)) {
     throw new Error(`${name} nao pode usar o valor padrao em producao.`);
+  }
+
+  const normalizedValue = value.toLowerCase();
+  if (
+    unsafeSecretFragments.some((fragment) =>
+      normalizedValue.includes(fragment),
+    )
+  ) {
+    throw new Error(`${name} precisa ser trocado antes de iniciar em producao.`);
+  }
+}
+
+function validateProductionDatabaseUrl(persistenceMode: string): void {
+  if (persistenceMode !== 'prisma') {
+    return;
+  }
+
+  const value = (process.env.DATABASE_URL ?? '').trim();
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    throw new Error('DATABASE_URL precisa ser uma URL valida em producao.');
+  }
+
+  if (!['postgresql:', 'postgres:'].includes(url.protocol)) {
+    throw new Error('DATABASE_URL precisa apontar para PostgreSQL em producao.');
+  }
+
+  if (
+    value.toLowerCase().includes('troque-por-') ||
+    url.password.toLowerCase().includes('change-me')
+  ) {
+    throw new Error('DATABASE_URL contem placeholder e precisa ser trocada.');
   }
 }

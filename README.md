@@ -10,7 +10,7 @@ Este repositório corresponde ao projeto GitHub `wilhamsouza/Tatu-2.0`.
 - Backend Node.js + TypeScript em [`backend/`](backend/), com Express, Prisma e JWT.
 - Sync Bridge com outbox, inbox, retries, idempotência e updates incrementais.
 - ERP e CRM server-first, seguindo o documento mestre do Tatuzin 2.0.
-- Deploy inicial para Oracle VM documentado em [`docs/VM_DEPLOY_ORACLE.md`](docs/VM_DEPLOY_ORACLE.md).
+- Deploy inicial para Oracle VM com PostgreSQL e Nginx documentado em [`docs/VM_DEPLOY_ORACLE.md`](docs/VM_DEPLOY_ORACLE.md).
 
 ## Estrutura
 
@@ -74,9 +74,11 @@ cd backend && npm test
 cd backend && npm run build
 ```
 
+Os testes de integração Prisma/PostgreSQL rodam quando `TEST_DATABASE_URL` aponta para um banco PostgreSQL dedicado de teste.
+
 ## Deploy
 
-A stack inicial de VM usa Docker Compose e Caddy para publicar a API em `https://api.tatuzin.com.br`.
+A stack inicial de VM usa Docker Compose para backend + PostgreSQL e Nginx no host para publicar a API em `https://api.tatuzin.com.br`.
 
 Consulte [`docs/VM_DEPLOY_ORACLE.md`](docs/VM_DEPLOY_ORACLE.md).
 
