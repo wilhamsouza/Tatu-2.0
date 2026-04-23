@@ -1,0 +1,502 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+enum AppRole {
+  ADMIN
+  MANAGER
+  SELLER
+  CASHIER
+  CRM_USER
+}
+
+enum PaymentMethod {
+  CASH
+  PIX
+  NOTE
+}
+
+enum SettlementMethod {
+  CASH
+  PIX
+  BANK_TRANSFER
+  MIXED
+}
+
+enum SaleStatus {
+  COMPLETED
+  CANCELED
+}
+
+enum ReceivableStatus {
+  PENDING
+  PARTIALLY_PAID
+  PAID
+  OVERDUE
+  CANCELED
+}
+
+enum PurchaseStatus {
+  PENDING
+  PARTIALLY_RECEIVED
+  RECEIVED
+  CANCELED
+}
+
+enum CashMovementType {
+  OPENING
+  SALE_CASH
+  SALE_PIX
+  SALE_NOTE
+  SUPPLY
+  WITHDRAWAL
+  RECEIVABLE_SETTLEMENT_CASH
+  RECEIVABLE_SETTLEMENT_PIX
+  CLOSING
+}
+
+enum CashSessionStatus {
+  OPEN
+  CLOSED
+}
+
+enum SyncOperationStatus {
+  PENDING
+  SENDING
+  SYNCED
+  FAILED
+  CONFLICT
+  CANCELED
+}
+
+model Company {
+  id                String               @id @default(cuid())
+  name              String
+  memberships       CompanyMembership[]
+  devices           Device[]
+  categories        Category[]
+  products          Product[]
+  productVariants   ProductVariant[]
+  inventoryBalances InventoryBalance[]
+  stockMovements    StockMovement[]
+  suppliers         Supplier[]
+  purchaseOrders    PurchaseOrder[]
+  sales             Sale[]
+  customers         Customer[]
+  receivableNotes   ReceivableNote[]
+  cashSessions      CashSessionRemote[]
+  cashMovements     CashMovementRemote[]
+  syncOperationLogs SyncOperationLog[]
+  syncConflicts     SyncConflict[]
+  syncCursors       SyncCursor[]
+  createdAt         DateTime             @default(now())
+  updatedAt         DateTime             @updatedAt
+}
+
+model User {
+  id            String              @id @default(cuid())
+  name          String
+  email         String              @unique
+  passwordHash  String
+  memberships   CompanyMembership[]
+  devices       Device[]
+  refreshTokens RefreshSession[]
+  sales         Sale[]
+  createdAt     DateTime            @default(now())
+  updatedAt     DateTime            @updatedAt
+}
+
+model CompanyMembership {
+  id        String  @id @default(cuid())
+  companyId String
+  userId    String
+  role      AppRole
+  company   Company @relation(fields: [companyId], references: [id])
+  user      User    @relation(fields: [userId], references: [id])
+
+  @@unique([companyId, userId, role])
+  @@index([companyId])
+  @@index([userId])
+}
+
+model RefreshSession {
+  id               String   @id @default(cuid())
+  userId           String
+  refreshTokenHash String   @unique
+  expiresAt        DateTime
+  createdAt        DateTime @default(now())
+  user             User     @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+}
+
+model Device {
+  id               String   @id @default(cuid())
+  companyId        String
+  userId           String
+  deviceIdentifier String
+  platform         String
+  appVersion       String?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  company          Company  @relation(fields: [companyId], references: [id])
+  user             User     @relation(fields: [userId], references: [id])
+
+  @@unique([companyId, deviceIdentifier])
+  @@index([companyId])
+  @@index([userId])
+}
+
+model Category {
+  id        String    @id @default(cuid())
+  companyId String
+  name      String
+  active    Boolean   @default(true)
+  company   Company   @relation(fields: [companyId], references: [id])
+  products  Product[]
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  @@unique([companyId, name])
+  @@index([companyId])
+}
+
+model Product {
+  id         String           @id @default(cuid())
+  companyId  String
+  categoryId String?
+  name       String
+  active     Boolean          @default(true)
+  company    Company          @relation(fields: [companyId], references: [id])
+  category   Category?        @relation(fields: [categoryId], references: [id])
+  variants   ProductVariant[]
+  createdAt  DateTime         @default(now())
+  updatedAt  DateTime         @updatedAt
+
+  @@index([companyId])
+  @@index([categoryId])
+}
+
+model ProductVariant {
+  id                      String              @id @default(cuid())
+  companyId               String
+  productId               String
+  barcode                 String?
+  sku                     String?
+  color                   String?
+  size                    String?
+  priceInCents            Int
+  promotionalPriceInCents Int?
+  active                  Boolean             @default(true)
+  company                 Company             @relation(fields: [companyId], references: [id])
+  product                 Product             @relation(fields: [productId], references: [id])
+  inventoryBalances       InventoryBalance[]
+  stockMovements          StockMovement[]
+  purchaseItems           PurchaseOrderItem[]
+  saleItems               SaleItem[]
+  createdAt               DateTime            @default(now())
+  updatedAt               DateTime            @updatedAt
+
+  @@unique([companyId, barcode])
+  @@unique([companyId, sku])
+  @@index([companyId])
+  @@index([productId])
+}
+
+model InventoryBalance {
+  id             String         @id @default(cuid())
+  companyId      String
+  variantId      String
+  quantityOnHand Int            @default(0)
+  updatedAt      DateTime       @updatedAt
+  company        Company        @relation(fields: [companyId], references: [id])
+  variant        ProductVariant @relation(fields: [variantId], references: [id])
+
+  @@unique([companyId, variantId])
+  @@index([companyId])
+}
+
+model StockMovement {
+  id            String         @id @default(cuid())
+  companyId     String
+  variantId     String
+  quantityDelta Int
+  reason        String
+  referenceId   String?
+  createdAt     DateTime       @default(now())
+  company       Company        @relation(fields: [companyId], references: [id])
+  variant       ProductVariant @relation(fields: [variantId], references: [id])
+
+  @@index([companyId, createdAt])
+  @@index([variantId])
+}
+
+model Supplier {
+  id             String          @id @default(cuid())
+  companyId      String
+  name           String
+  phone          String?
+  email          String?
+  notes          String?
+  company        Company         @relation(fields: [companyId], references: [id])
+  purchaseOrders PurchaseOrder[]
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+
+  @@index([companyId])
+}
+
+model PurchaseOrder {
+  id         String              @id @default(cuid())
+  companyId  String
+  supplierId String
+  status     PurchaseStatus      @default(PENDING)
+  notes      String?
+  company    Company             @relation(fields: [companyId], references: [id])
+  supplier   Supplier            @relation(fields: [supplierId], references: [id])
+  items      PurchaseOrderItem[]
+  receipts   GoodsReceipt[]
+  createdAt  DateTime            @default(now())
+  updatedAt  DateTime            @updatedAt
+
+  @@index([companyId, status])
+  @@index([supplierId])
+}
+
+model PurchaseOrderItem {
+  id                 String             @id @default(cuid())
+  purchaseOrderId    String
+  variantId          String
+  variantDisplayName String
+  quantityOrdered    Int
+  quantityReceived   Int                @default(0)
+  unitCostInCents    Int
+  lineTotalInCents   Int
+  purchaseOrder      PurchaseOrder      @relation(fields: [purchaseOrderId], references: [id])
+  variant            ProductVariant     @relation(fields: [variantId], references: [id])
+  receiptLines       GoodsReceiptLine[]
+
+  @@index([purchaseOrderId])
+  @@index([variantId])
+}
+
+model GoodsReceipt {
+  id              String             @id @default(cuid())
+  purchaseOrderId String
+  receivedAt      DateTime
+  createdAt       DateTime           @default(now())
+  purchaseOrder   PurchaseOrder      @relation(fields: [purchaseOrderId], references: [id])
+  lines           GoodsReceiptLine[]
+
+  @@index([purchaseOrderId])
+}
+
+model GoodsReceiptLine {
+  id               String            @id @default(cuid())
+  goodsReceiptId   String
+  purchaseItemId   String
+  variantId        String
+  quantityReceived Int
+  goodsReceipt     GoodsReceipt      @relation(fields: [goodsReceiptId], references: [id])
+  purchaseItem     PurchaseOrderItem @relation(fields: [purchaseItemId], references: [id])
+
+  @@index([goodsReceiptId])
+  @@index([purchaseItemId])
+}
+
+model Customer {
+  id              String           @id @default(cuid())
+  companyId       String
+  name            String
+  phone           String
+  email           String?
+  address         String?
+  notes           String?
+  source          String           @default("manual")
+  company         Company          @relation(fields: [companyId], references: [id])
+  sales           Sale[]
+  receivableNotes ReceivableNote[]
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+
+  @@unique([companyId, phone])
+  @@index([companyId])
+}
+
+model Sale {
+  id              String           @id @default(cuid())
+  companyId       String
+  userId          String
+  customerId      String?
+  operationId     String?
+  status          SaleStatus       @default(COMPLETED)
+  subtotalInCents Int
+  discountInCents Int
+  totalInCents    Int
+  company         Company          @relation(fields: [companyId], references: [id])
+  user            User             @relation(fields: [userId], references: [id])
+  customer        Customer?        @relation(fields: [customerId], references: [id])
+  items           SaleItem[]
+  payments        Payment[]
+  receivableNotes ReceivableNote[]
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+
+  @@unique([companyId, operationId])
+  @@index([companyId, createdAt])
+  @@index([customerId])
+}
+
+model SaleItem {
+  id                String          @id @default(cuid())
+  saleId            String
+  variantId         String?
+  displayName       String
+  quantity          Int
+  unitPriceInCents  Int
+  totalPriceInCents Int
+  sale              Sale            @relation(fields: [saleId], references: [id])
+  variant           ProductVariant? @relation(fields: [variantId], references: [id])
+
+  @@index([saleId])
+  @@index([variantId])
+}
+
+model Payment {
+  id            String        @id @default(cuid())
+  saleId        String
+  method        PaymentMethod
+  amountInCents Int
+  dueDate       DateTime?
+  notes         String?
+  sale          Sale          @relation(fields: [saleId], references: [id])
+  createdAt     DateTime      @default(now())
+
+  @@index([saleId])
+}
+
+model ReceivableNote {
+  id                       String                 @id @default(cuid())
+  companyId                String
+  saleId                   String
+  customerId               String?
+  originalAmountInCents    Int
+  paidAmountInCents        Int                    @default(0)
+  outstandingAmountInCents Int
+  dueDate                  DateTime
+  issueDate                DateTime
+  status                   ReceivableStatus
+  notes                    String?
+  createdByUserId          String
+  company                  Company                @relation(fields: [companyId], references: [id])
+  sale                     Sale                   @relation(fields: [saleId], references: [id])
+  customer                 Customer?              @relation(fields: [customerId], references: [id])
+  settlements              ReceivableSettlement[]
+  createdAt                DateTime               @default(now())
+  updatedAt                DateTime               @updatedAt
+
+  @@unique([companyId, saleId])
+  @@index([companyId, status])
+  @@index([customerId])
+}
+
+model ReceivableSettlement {
+  id               String           @id @default(cuid())
+  receivableNoteId String
+  operationId      String?
+  amountInCents    Int
+  settlementMethod SettlementMethod
+  settledAt        DateTime
+  createdByUserId  String
+  receivableNote   ReceivableNote   @relation(fields: [receivableNoteId], references: [id])
+  createdAt        DateTime         @default(now())
+
+  @@unique([receivableNoteId, operationId])
+  @@index([receivableNoteId])
+}
+
+model CashSessionRemote {
+  id                 String               @id @default(cuid())
+  companyId          String
+  userId             String
+  cashSessionLocalId String
+  status             CashSessionStatus    @default(OPEN)
+  openedAt           DateTime
+  closedAt           DateTime?
+  notes              String?
+  company            Company              @relation(fields: [companyId], references: [id])
+  movements          CashMovementRemote[]
+  createdAt          DateTime             @default(now())
+  updatedAt          DateTime             @updatedAt
+
+  @@unique([companyId, cashSessionLocalId])
+  @@index([companyId, status])
+}
+
+model CashMovementRemote {
+  id                 String            @id @default(cuid())
+  companyId          String
+  cashSessionId      String
+  cashSessionLocalId String
+  userId             String
+  saleLocalId        String?
+  type               CashMovementType
+  amountInCents      Int
+  notes              String?
+  createdAt          DateTime          @default(now())
+  updatedAt          DateTime          @updatedAt
+  company            Company           @relation(fields: [companyId], references: [id])
+  cashSession        CashSessionRemote @relation(fields: [cashSessionId], references: [id])
+
+  @@index([companyId, createdAt])
+  @@index([cashSessionId])
+}
+
+model SyncOperationLog {
+  id          String              @id @default(cuid())
+  companyId   String
+  deviceId    String?
+  operationId String
+  type        String
+  status      SyncOperationStatus
+  payloadJson String
+  lastError   String?
+  company     Company             @relation(fields: [companyId], references: [id])
+  createdAt   DateTime            @default(now())
+  updatedAt   DateTime            @updatedAt
+
+  @@unique([companyId, operationId])
+  @@index([companyId, status])
+}
+
+model SyncConflict {
+  id          String    @id @default(cuid())
+  companyId   String
+  operationId String
+  type        String
+  message     String
+  payloadJson String?
+  resolvedAt  DateTime?
+  company     Company   @relation(fields: [companyId], references: [id])
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([companyId, createdAt])
+}
+
+model SyncCursor {
+  id        String   @id @default(cuid())
+  companyId String
+  deviceId  String
+  stream    String
+  cursor    String?
+  company   Company  @relation(fields: [companyId], references: [id])
+  updatedAt DateTime @updatedAt
+
+  @@unique([companyId, deviceId, stream])
+}
