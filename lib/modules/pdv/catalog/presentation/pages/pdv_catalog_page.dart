@@ -32,6 +32,7 @@ import '../../../local_dashboard/presentation/providers/local_dashboard_provider
 import '../../application/usecases/load_sale_catalog_usecase.dart';
 import '../../domain/entities/product_variant_sale_snapshot.dart';
 import '../providers/catalog_providers.dart';
+import '../widgets/mobile_pdv_widgets.dart';
 
 class PdvCatalogPage extends ConsumerStatefulWidget {
   const PdvCatalogPage({super.key});
@@ -172,7 +173,12 @@ class _PdvCatalogPageState extends ConsumerState<PdvCatalogPage> {
       child: LayoutBuilder(
         builder: (context, constraints) {
           final isWide = constraints.maxWidth >= 1080;
-          final catalogSection = _buildCatalogSection(context, catalogState);
+          final isMobile = constraints.maxWidth < 720;
+          final catalogSection = _buildCatalogSection(
+            context,
+            catalogState,
+            compact: isMobile,
+          );
           final sidePanel = _buildSidePanel(
             context,
             cart: cart,
@@ -200,6 +206,16 @@ class _PdvCatalogPageState extends ConsumerState<PdvCatalogPage> {
             );
           }
 
+          if (isMobile) {
+            return _buildMobileLayout(
+              context,
+              catalogSection: catalogSection,
+              cart: cart,
+              cashState: cashState,
+              checkoutState: checkoutState,
+            );
+          }
+
           return ListView(
             children: <Widget>[
               catalogSection,
@@ -212,10 +228,284 @@ class _PdvCatalogPageState extends ConsumerState<PdvCatalogPage> {
     );
   }
 
+  Widget _buildMobileLayout(
+    BuildContext context, {
+    required Widget catalogSection,
+    required Cart cart,
+    required AsyncValue<CashSessionSummary?> cashState,
+    required AsyncValue<CheckoutResult?> checkoutState,
+  }) {
+    final bottomPadding = cart.items.isEmpty ? 104.0 : 128.0;
+
+    return Stack(
+      children: <Widget>[
+        ListView(
+          padding: EdgeInsets.only(bottom: bottomPadding),
+          children: <Widget>[
+            _buildMobileCashAccess(context, cashState),
+            const SizedBox(height: 10),
+            catalogSection,
+          ],
+        ),
+        Positioned(
+          left: 0,
+          right: 0,
+          bottom: 0,
+          child: PdvMobileCartBar(
+            totalItems: cart.totalItems,
+            totalInCents: cart.totalInCents,
+            checkoutBlocked: cashState.asData?.value == null,
+            isLoading: checkoutState.isLoading,
+            onOpen: () => _openCartCheckoutSheet(context),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildMobileCashAccess(
+    BuildContext context,
+    AsyncValue<CashSessionSummary?> cashState,
+  ) {
+    final cashSummary = cashState.asData?.value;
+
+    if (cashState.isLoading && cashSummary == null) {
+      return const Card(
+        margin: EdgeInsets.zero,
+        child: Padding(
+          padding: EdgeInsets.all(12),
+          child: LinearProgressIndicator(),
+        ),
+      );
+    }
+
+    if (cashSummary == null) {
+      return Card(
+        margin: EdgeInsets.zero,
+        child: Padding(
+          padding: const EdgeInsets.all(12),
+          child: Row(
+            children: <Widget>[
+              const Icon(Icons.lock_outline),
+              const SizedBox(width: 10),
+              Expanded(
+                child: TextField(
+                  controller: _openingAmountController,
+                  keyboardType: const TextInputType.numberWithOptions(
+                    decimal: true,
+                  ),
+                  decoration: const InputDecoration(
+                    isDense: true,
+                    labelText: 'Caixa fechado',
+                    hintText: 'Abertura',
+                    contentPadding: EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 10,
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              FilledButton(
+                onPressed: cashState.isLoading ? null : _openCashSession,
+                child: const Text('Abrir'),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    return Card(
+      margin: EdgeInsets.zero,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(16),
+        onTap: () => _openCashSheet(context),
+        child: Padding(
+          padding: const EdgeInsets.all(12),
+          child: Row(
+            children: <Widget>[
+              const Icon(Icons.point_of_sale_outlined),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    Text(
+                      'Caixa aberto',
+                      style: Theme.of(context).textTheme.titleSmall,
+                    ),
+                    Text(
+                      '${cashSummary.totalSalesCount} vendas - saldo ${CurrencyUtils.formatMoney(cashSummary.expectedCashBalanceInCents)}',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              FilledButton.tonal(
+                onPressed: () => _openCashSheet(context),
+                child: const Text('Caixa'),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _openCashSheet(BuildContext context) {
+    return showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      builder: (_) {
+        return DraggableScrollableSheet(
+          expand: false,
+          initialChildSize: 0.78,
+          minChildSize: 0.42,
+          maxChildSize: 0.96,
+          builder: (context, scrollController) {
+            return StatefulBuilder(
+              builder: (context, modalSetState) {
+                return Consumer(
+                  builder: (context, sheetRef, child) {
+                    final sheetCashState = sheetRef.watch(
+                      cashRegisterNotifierProvider,
+                    );
+                    final sheetCashSummary = sheetCashState.asData?.value;
+                    final sheetDashboardState = sheetCashSummary == null
+                        ? null
+                        : sheetRef.watch(
+                            localDashboardSnapshotProvider(
+                              sheetCashSummary.session.localId,
+                            ),
+                          );
+
+                    return SingleChildScrollView(
+                      controller: scrollController,
+                      padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+                      child: Column(
+                        children: <Widget>[
+                          const PdvBottomSheetHandle(title: 'Caixa'),
+                          _buildCashSection(
+                            context,
+                            sheetCashState,
+                            modalSetState: modalSetState,
+                          ),
+                          if (sheetDashboardState != null) ...<Widget>[
+                            const SizedBox(height: 16),
+                            _buildLocalIndicatorsSection(
+                              context,
+                              sheetDashboardState,
+                            ),
+                          ],
+                        ],
+                      ),
+                    );
+                  },
+                );
+              },
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Future<void> _openCartCheckoutSheet(BuildContext context) {
+    return showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      builder: (_) {
+        return DraggableScrollableSheet(
+          expand: false,
+          initialChildSize: 0.9,
+          minChildSize: 0.52,
+          maxChildSize: 0.98,
+          builder: (context, scrollController) {
+            return StatefulBuilder(
+              builder: (context, modalSetState) {
+                return Consumer(
+                  builder: (context, sheetRef, child) {
+                    final sheetCart = sheetRef.watch(cartNotifierProvider);
+                    final sheetCashState = sheetRef.watch(
+                      cashRegisterNotifierProvider,
+                    );
+                    final sheetCheckoutState = sheetRef.watch(
+                      checkoutNotifierProvider,
+                    );
+                    final sheetSession = sheetRef
+                        .watch(sessionNotifierProvider)
+                        .asData
+                        ?.value;
+                    final customerQuery =
+                        _customerPhoneController.text.trim().isNotEmpty
+                        ? _customerPhoneController.text.trim()
+                        : _customerNameController.text.trim();
+                    final sheetQuickCustomersState = sheetRef.watch(
+                      quickCustomerSearchProvider(customerQuery),
+                    );
+                    final sheetPixPayload = sheetSession == null
+                        ? null
+                        : sheetRef
+                              .read(pixPayloadServiceProvider)
+                              .buildManualPayload(
+                                totalInCents: sheetCart.totalInCents,
+                                companyName:
+                                    sheetSession.companyContext.companyName,
+                                deviceId:
+                                    sheetSession.deviceRegistration.deviceId,
+                              );
+
+                    return SingleChildScrollView(
+                      controller: scrollController,
+                      padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+                      child: Column(
+                        children: <Widget>[
+                          const PdvBottomSheetHandle(
+                            title: 'Carrinho e checkout',
+                          ),
+                          _buildMobileCheckoutSheetContent(
+                            context,
+                            cart: sheetCart,
+                            cashState: sheetCashState,
+                            checkoutState: sheetCheckoutState,
+                            quickCustomersState: sheetQuickCustomersState,
+                            pixPayload: sheetPixPayload,
+                            modalSetState: modalSetState,
+                          ),
+                        ],
+                      ),
+                    );
+                  },
+                );
+              },
+            );
+          },
+        );
+      },
+    );
+  }
+
   Widget _buildCatalogSection(
     BuildContext context,
-    AsyncValue<SaleCatalogView> catalogState,
-  ) {
+    AsyncValue<SaleCatalogView> catalogState, {
+    bool compact = false,
+  }) {
+    if (compact) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          _buildCompactCatalogHeader(context),
+          const SizedBox(height: 8),
+          _buildCatalogContent(context, catalogState, compact: true),
+        ],
+      );
+    }
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: <Widget>[
@@ -235,94 +525,564 @@ class _PdvCatalogPageState extends ConsumerState<PdvCatalogPage> {
           ),
         ),
         const SizedBox(height: TatuzinSpacing.md),
-        catalogState.when(
-          loading: () => const Center(
-            child: Padding(
-              padding: EdgeInsets.all(24),
-              child: CircularProgressIndicator(),
-            ),
-          ),
-          error: (error, stackTrace) => _SectionCard(
-            title: 'Falha ao carregar catalogo',
-            child: Text(error.toString()),
-          ),
-          data: (catalog) {
-            return Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: <Widget>[
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: <Widget>[
-                    ChoiceChip(
-                      label: const Text('Todas'),
-                      selected: _selectedCategoryName == null,
-                      onSelected: (_) {
-                        setState(() {
-                          _selectedCategoryName = null;
-                        });
-                      },
-                    ),
-                    for (final category in catalog.categories)
-                      ChoiceChip(
-                        label: Text(category.name),
-                        selected: _selectedCategoryName == category.name,
-                        onSelected: (_) {
-                          setState(() {
-                            _selectedCategoryName =
-                                _selectedCategoryName == category.name
-                                ? null
-                                : category.name;
-                          });
-                        },
-                      ),
-                  ],
-                ),
-                const SizedBox(height: 16),
-                if (catalog.variants.isEmpty)
-                  _SectionCard(
-                    title: 'Nenhum item encontrado',
-                    child: const Text(
-                      'Ajuste a busca ou troque a categoria para encontrar produtos.',
-                    ),
-                  )
-                else
-                  LayoutBuilder(
-                    builder: (context, constraints) {
-                      final crossAxisCount = constraints.maxWidth >= 900
-                          ? 3
-                          : constraints.maxWidth >= 640
-                          ? 2
-                          : 1;
+        _buildCatalogContent(context, catalogState),
+      ],
+    );
+  }
 
-                      return GridView.builder(
-                        shrinkWrap: true,
-                        physics: const NeverScrollableScrollPhysics(),
-                        itemCount: catalog.variants.length,
-                        gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                          crossAxisCount: crossAxisCount,
-                          crossAxisSpacing: 16,
-                          mainAxisSpacing: 16,
-                          mainAxisExtent: 220,
-                        ),
-                        itemBuilder: (context, index) {
-                          final variant = catalog.variants[index];
-                          return _ProductCard(
-                            variant: variant,
-                            onAdd: () {
-                              ref
-                                  .read(cartNotifierProvider.notifier)
-                                  .addVariant(variant);
-                            },
-                          );
+  Widget _buildCompactCatalogHeader(BuildContext context) {
+    return Card(
+      margin: EdgeInsets.zero,
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Text('Catalogo', style: Theme.of(context).textTheme.titleMedium),
+            const SizedBox(height: 8),
+            TextField(
+              controller: _searchController,
+              textInputAction: TextInputAction.search,
+              decoration: const InputDecoration(
+                isDense: true,
+                labelText: 'Buscar item',
+                hintText: 'Nome, codigo ou SKU',
+                prefixIcon: Icon(Icons.search),
+                contentPadding: EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 10,
+                ),
+              ),
+              onChanged: (_) => setState(() {}),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildCatalogContent(
+    BuildContext context,
+    AsyncValue<SaleCatalogView> catalogState, {
+    bool compact = false,
+  }) {
+    return catalogState.when(
+      loading: () => const Center(
+        child: Padding(
+          padding: EdgeInsets.all(24),
+          child: CircularProgressIndicator(),
+        ),
+      ),
+      error: (error, stackTrace) => _SectionCard(
+        title: 'Falha ao carregar catalogo',
+        child: Text(error.toString()),
+      ),
+      data: (catalog) {
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            _buildCategoryFilters(context, catalog, compact: compact),
+            SizedBox(height: compact ? 10 : 16),
+            if (catalog.variants.isEmpty)
+              _SectionCard(
+                title: 'Nenhum item encontrado',
+                child: const Text(
+                  'Ajuste a busca ou troque a categoria para encontrar produtos.',
+                ),
+              )
+            else if (compact)
+              ListView.separated(
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                itemCount: catalog.variants.length,
+                separatorBuilder: (context, index) => const SizedBox(height: 8),
+                itemBuilder: (context, index) {
+                  final variant = catalog.variants[index];
+                  return PdvMobileProductTile(
+                    variant: variant,
+                    onAdd: () {
+                      ref
+                          .read(cartNotifierProvider.notifier)
+                          .addVariant(variant);
+                    },
+                  );
+                },
+              )
+            else
+              LayoutBuilder(
+                builder: (context, constraints) {
+                  final crossAxisCount = constraints.maxWidth >= 900
+                      ? 3
+                      : constraints.maxWidth >= 640
+                      ? 2
+                      : 1;
+
+                  return GridView.builder(
+                    shrinkWrap: true,
+                    physics: const NeverScrollableScrollPhysics(),
+                    itemCount: catalog.variants.length,
+                    gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                      crossAxisCount: crossAxisCount,
+                      crossAxisSpacing: 16,
+                      mainAxisSpacing: 16,
+                      mainAxisExtent: 214,
+                    ),
+                    itemBuilder: (context, index) {
+                      final variant = catalog.variants[index];
+                      return _ProductCard(
+                        variant: variant,
+                        onAdd: () {
+                          ref
+                              .read(cartNotifierProvider.notifier)
+                              .addVariant(variant);
                         },
                       );
                     },
-                  ),
-              ],
-            );
+                  );
+                },
+              ),
+          ],
+        );
+      },
+    );
+  }
+
+  Widget _buildCategoryFilters(
+    BuildContext context,
+    SaleCatalogView catalog, {
+    required bool compact,
+  }) {
+    final chips = <Widget>[
+      ChoiceChip(
+        label: const Text('Todas'),
+        selected: _selectedCategoryName == null,
+        materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+        visualDensity: compact ? VisualDensity.compact : null,
+        onSelected: (_) {
+          setState(() {
+            _selectedCategoryName = null;
+          });
+        },
+      ),
+      for (final category in catalog.categories)
+        ChoiceChip(
+          label: Text(category.name),
+          selected: _selectedCategoryName == category.name,
+          materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+          visualDensity: compact ? VisualDensity.compact : null,
+          onSelected: (_) {
+            setState(() {
+              _selectedCategoryName = _selectedCategoryName == category.name
+                  ? null
+                  : category.name;
+            });
           },
         ),
+    ];
+
+    if (!compact) {
+      return Wrap(spacing: 8, runSpacing: 8, children: chips);
+    }
+
+    return SizedBox(
+      height: 38,
+      child: ListView.separated(
+        scrollDirection: Axis.horizontal,
+        itemCount: chips.length,
+        separatorBuilder: (context, index) => const SizedBox(width: 8),
+        itemBuilder: (context, index) => chips[index],
+      ),
+    );
+  }
+
+  Widget _buildMobileCheckoutSheetContent(
+    BuildContext context, {
+    required Cart cart,
+    required AsyncValue<CashSessionSummary?> cashState,
+    required AsyncValue<CheckoutResult?> checkoutState,
+    required AsyncValue<List<QuickCustomer>> quickCustomersState,
+    required String? pixPayload,
+    StateSetter? modalSetState,
+  }) {
+    final cashSummary = cashState.asData?.value;
+    final lastCheckoutResult = checkoutState.asData?.value;
+    final cashReceived = _parseCurrencyOrZero(_amountReceivedController.text);
+    final computedChange = _selectedPaymentMethod == PaymentMethod.cash
+        ? (cashReceived - cart.totalInCents).clamp(0, cashReceived)
+        : 0;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        _SectionCard(
+          title: 'Carrinho',
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              if (cart.items.isEmpty)
+                const Text('Nenhum item no carrinho ainda.')
+              else
+                ...cart.items.map(
+                  (item) => Padding(
+                    padding: const EdgeInsets.only(bottom: 8),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.center,
+                      children: <Widget>[
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: <Widget>[
+                              Text(
+                                item.variant.displayName,
+                                style: Theme.of(context).textTheme.titleSmall,
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                              if (item.variant.subtitle.isNotEmpty)
+                                Text(
+                                  item.variant.subtitle,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              Text(
+                                CurrencyUtils.formatMoney(
+                                  item.unitPriceInCents,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        IconButton(
+                          onPressed: () {
+                            ref
+                                .read(cartNotifierProvider.notifier)
+                                .decrementItem(item.variant.localId);
+                          },
+                          icon: const Icon(Icons.remove_circle_outline),
+                        ),
+                        Text('${item.quantity}'),
+                        IconButton(
+                          onPressed: () {
+                            ref
+                                .read(cartNotifierProvider.notifier)
+                                .incrementItem(item.variant.localId);
+                          },
+                          icon: const Icon(Icons.add_circle_outline),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              const Divider(),
+              Row(
+                children: <Widget>[
+                  Expanded(
+                    child: Text(
+                      '${cart.totalItems} item(ns)',
+                      style: Theme.of(context).textTheme.labelLarge,
+                    ),
+                  ),
+                  Text(
+                    CurrencyUtils.formatMoney(cart.totalInCents),
+                    style: Theme.of(context).textTheme.titleLarge,
+                  ),
+                ],
+              ),
+              ExpansionTile(
+                tilePadding: EdgeInsets.zero,
+                childrenPadding: EdgeInsets.zero,
+                title: const Text('Aplicar desconto'),
+                children: <Widget>[
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: SegmentedButton<DiscountType>(
+                      segments: const <ButtonSegment<DiscountType>>[
+                        ButtonSegment<DiscountType>(
+                          value: DiscountType.value,
+                          label: Text('Valor'),
+                        ),
+                        ButtonSegment<DiscountType>(
+                          value: DiscountType.percentage,
+                          label: Text('Percentual'),
+                        ),
+                      ],
+                      selected: <DiscountType>{_selectedDiscountType},
+                      onSelectionChanged: (selection) {
+                        _setPdvState(() {
+                          _selectedDiscountType = selection.first;
+                        }, modalSetState);
+                      },
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Row(
+                    children: <Widget>[
+                      Expanded(
+                        child: TextField(
+                          controller: _discountController,
+                          keyboardType: const TextInputType.numberWithOptions(
+                            decimal: true,
+                          ),
+                          decoration: InputDecoration(
+                            labelText:
+                                _selectedDiscountType == DiscountType.value
+                                ? 'Valor do desconto'
+                                : 'Percentual',
+                            hintText:
+                                _selectedDiscountType == DiscountType.value
+                                ? '10,00'
+                                : '5',
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      FilledButton(
+                        onPressed: cart.items.isEmpty ? null : _applyDiscount,
+                        child: const Text('Aplicar'),
+                      ),
+                    ],
+                  ),
+                  if (cart.discount != null)
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: TextButton(
+                        onPressed: () {
+                          _discountController.clear();
+                          ref
+                              .read(cartNotifierProvider.notifier)
+                              .applyDiscount(null);
+                        },
+                        child: const Text('Remover desconto'),
+                      ),
+                    ),
+                ],
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 12),
+        _SectionCard(
+          title: 'Checkout',
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              SegmentedButton<PaymentMethod>(
+                segments: const <ButtonSegment<PaymentMethod>>[
+                  ButtonSegment<PaymentMethod>(
+                    value: PaymentMethod.cash,
+                    label: Text('Dinheiro'),
+                  ),
+                  ButtonSegment<PaymentMethod>(
+                    value: PaymentMethod.pix,
+                    label: Text('Pix'),
+                  ),
+                  ButtonSegment<PaymentMethod>(
+                    value: PaymentMethod.note,
+                    label: Text('Nota'),
+                  ),
+                ],
+                selected: <PaymentMethod>{_selectedPaymentMethod},
+                onSelectionChanged: (selection) {
+                  _setPdvState(() {
+                    _selectedPaymentMethod = selection.first;
+                    if (_selectedPaymentMethod != PaymentMethod.note) {
+                      _selectedDueDate = null;
+                    }
+                    if (_selectedPaymentMethod != PaymentMethod.pix) {
+                      _pixConfirmedManually = false;
+                    }
+                  }, modalSetState);
+                },
+              ),
+              const SizedBox(height: 12),
+              if (_selectedPaymentMethod == PaymentMethod.cash) ...<Widget>[
+                TextField(
+                  controller: _amountReceivedController,
+                  keyboardType: const TextInputType.numberWithOptions(
+                    decimal: true,
+                  ),
+                  decoration: const InputDecoration(
+                    labelText: 'Valor recebido',
+                    hintText: '0,00',
+                    helperText: 'Em branco = valor exato',
+                  ),
+                  onChanged: (_) => _refreshPdvUi(modalSetState),
+                ),
+                const SizedBox(height: 8),
+                Text('Troco: ${CurrencyUtils.formatMoney(computedChange)}'),
+              ],
+              if (_selectedPaymentMethod == PaymentMethod.pix)
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    if (pixPayload != null) ...<Widget>[
+                      Center(
+                        child: DecoratedBox(
+                          decoration: BoxDecoration(
+                            color: Colors.white,
+                            borderRadius: BorderRadius.circular(20),
+                            border: Border.all(
+                              color: Theme.of(
+                                context,
+                              ).colorScheme.outlineVariant,
+                            ),
+                          ),
+                          child: Padding(
+                            padding: const EdgeInsets.all(12),
+                            child: QrImageView(
+                              data: pixPayload,
+                              size: 160,
+                              eyeStyle: const QrEyeStyle(
+                                eyeShape: QrEyeShape.square,
+                              ),
+                              dataModuleStyle: const QrDataModuleStyle(
+                                dataModuleShape: QrDataModuleShape.square,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      SelectableText(
+                        pixPayload,
+                        style: Theme.of(context).textTheme.bodySmall,
+                      ),
+                      const SizedBox(height: 8),
+                      OutlinedButton.icon(
+                        onPressed: () => _copyPixPayload(pixPayload),
+                        icon: const Icon(Icons.copy_all_outlined),
+                        label: const Text('Copiar codigo Pix'),
+                      ),
+                      const SizedBox(height: 8),
+                    ],
+                    CheckboxListTile(
+                      value: _pixConfirmedManually,
+                      contentPadding: EdgeInsets.zero,
+                      title: const Text('Pix confirmado manualmente'),
+                      onChanged: (value) {
+                        _setPdvState(() {
+                          _pixConfirmedManually = value ?? false;
+                        }, modalSetState);
+                      },
+                    ),
+                  ],
+                ),
+              if (_selectedPaymentMethod == PaymentMethod.note) ...<Widget>[
+                FilledButton.tonalIcon(
+                  onPressed: () => _pickDueDate(modalSetState: modalSetState),
+                  icon: const Icon(Icons.calendar_month_outlined),
+                  label: Text(
+                    _selectedDueDate == null
+                        ? 'Selecionar vencimento'
+                        : 'Vence em ${CurrencyUtils.formatDate(_selectedDueDate!)}',
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  'Total pendente: ${CurrencyUtils.formatMoney(cart.totalInCents)}',
+                ),
+                const SizedBox(height: 8),
+                TextField(
+                  controller: _noteDescriptionController,
+                  decoration: const InputDecoration(
+                    labelText: 'Observacao da nota',
+                  ),
+                ),
+                const SizedBox(height: 8),
+                const Text(
+                  'Nota exige cliente identificado. Preencha o cliente abaixo.',
+                ),
+              ],
+              const SizedBox(height: 16),
+              SizedBox(
+                width: double.infinity,
+                child: FilledButton.icon(
+                  onPressed:
+                      cart.items.isEmpty ||
+                          cashSummary == null ||
+                          checkoutState.isLoading
+                      ? null
+                      : _submitCheckout,
+                  icon: checkoutState.isLoading
+                      ? const SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.point_of_sale_outlined),
+                  label: Text(
+                    checkoutState.isLoading
+                        ? 'Concluindo...'
+                        : 'Concluir venda offline',
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 12),
+        _SectionCard(
+          title: 'Cliente rapido',
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              TextField(
+                controller: _customerNameController,
+                decoration: const InputDecoration(labelText: 'Nome do cliente'),
+                onChanged: (_) => _refreshPdvUi(modalSetState),
+              ),
+              const SizedBox(height: 8),
+              TextField(
+                controller: _customerPhoneController,
+                keyboardType: TextInputType.phone,
+                decoration: const InputDecoration(labelText: 'Telefone'),
+                onChanged: (_) => _refreshPdvUi(modalSetState),
+              ),
+              if (quickCustomersState.asData?.value.isNotEmpty ==
+                  true) ...<Widget>[
+                const SizedBox(height: 12),
+                Text(
+                  'Clientes encontrados localmente',
+                  style: Theme.of(context).textTheme.labelLarge,
+                ),
+                const SizedBox(height: 8),
+                ...quickCustomersState.asData!.value.map(
+                  (customer) => ListTile(
+                    dense: true,
+                    contentPadding: EdgeInsets.zero,
+                    title: Text(customer.name),
+                    subtitle: Text(customer.phone),
+                    trailing: const Icon(Icons.north_west),
+                    onTap: () => _fillQuickCustomer(
+                      customer,
+                      modalSetState: modalSetState,
+                    ),
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
+        if (lastCheckoutResult != null) ...<Widget>[
+          const SizedBox(height: 12),
+          _SectionCard(
+            title: 'Ultimo comprovante',
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Text('Venda: ${lastCheckoutResult.sale.localId}'),
+                Text('Arquivo: ${lastCheckoutResult.receipt.pdfPath}'),
+                const SizedBox(height: 12),
+                FilledButton.tonalIcon(
+                  onPressed: () =>
+                      _shareReceiptPdf(lastCheckoutResult.receipt.pdfPath),
+                  icon: const Icon(Icons.picture_as_pdf_outlined),
+                  label: const Text('Compartilhar PDF'),
+                ),
+              ],
+            ),
+          ),
+        ],
       ],
     );
   }
@@ -335,6 +1095,10 @@ class _PdvCatalogPageState extends ConsumerState<PdvCatalogPage> {
     required AsyncValue<CheckoutResult?> checkoutState,
     required AsyncValue<List<QuickCustomer>> quickCustomersState,
     required String? pixPayload,
+    bool includeCash = true,
+    bool includeIndicators = true,
+    bool includeRecentSales = true,
+    StateSetter? modalSetState,
   }) {
     final cashSummary = cashState.asData?.value;
     final lastCheckoutResult = checkoutState.asData?.value;
@@ -346,12 +1110,13 @@ class _PdvCatalogPageState extends ConsumerState<PdvCatalogPage> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: <Widget>[
-        _buildCashSection(context, cashState),
-        if (dashboardState != null) ...<Widget>[
+        if (includeCash) _buildCashSection(context, cashState),
+        if (includeIndicators && dashboardState != null) ...<Widget>[
           const SizedBox(height: 16),
           _buildLocalIndicatorsSection(context, dashboardState),
         ],
-        const SizedBox(height: 16),
+        if (includeCash || (includeIndicators && dashboardState != null))
+          const SizedBox(height: 16),
         _SectionCard(
           title: 'Carrinho',
           child: Column(
@@ -448,9 +1213,9 @@ class _PdvCatalogPageState extends ConsumerState<PdvCatalogPage> {
                 ],
                 selected: <DiscountType>{_selectedDiscountType},
                 onSelectionChanged: (selection) {
-                  setState(() {
+                  _setPdvState(() {
                     _selectedDiscountType = selection.first;
-                  });
+                  }, modalSetState);
                 },
               ),
               const SizedBox(height: 8),
@@ -504,14 +1269,14 @@ class _PdvCatalogPageState extends ConsumerState<PdvCatalogPage> {
               TextField(
                 controller: _customerNameController,
                 decoration: const InputDecoration(labelText: 'Nome do cliente'),
-                onChanged: (_) => setState(() {}),
+                onChanged: (_) => _refreshPdvUi(modalSetState),
               ),
               const SizedBox(height: 8),
               TextField(
                 controller: _customerPhoneController,
                 keyboardType: TextInputType.phone,
                 decoration: const InputDecoration(labelText: 'Telefone'),
-                onChanged: (_) => setState(() {}),
+                onChanged: (_) => _refreshPdvUi(modalSetState),
               ),
               if (quickCustomersState.asData?.value.isNotEmpty ==
                   true) ...<Widget>[
@@ -528,7 +1293,10 @@ class _PdvCatalogPageState extends ConsumerState<PdvCatalogPage> {
                     title: Text(customer.name),
                     subtitle: Text(customer.phone),
                     trailing: const Icon(Icons.north_west),
-                    onTap: () => _fillQuickCustomer(customer),
+                    onTap: () => _fillQuickCustomer(
+                      customer,
+                      modalSetState: modalSetState,
+                    ),
                   ),
                 ),
               ],
@@ -558,7 +1326,7 @@ class _PdvCatalogPageState extends ConsumerState<PdvCatalogPage> {
                 ],
                 selected: <PaymentMethod>{_selectedPaymentMethod},
                 onSelectionChanged: (selection) {
-                  setState(() {
+                  _setPdvState(() {
                     _selectedPaymentMethod = selection.first;
                     if (_selectedPaymentMethod != PaymentMethod.note) {
                       _selectedDueDate = null;
@@ -566,7 +1334,7 @@ class _PdvCatalogPageState extends ConsumerState<PdvCatalogPage> {
                     if (_selectedPaymentMethod != PaymentMethod.pix) {
                       _pixConfirmedManually = false;
                     }
-                  });
+                  }, modalSetState);
                 },
               ),
               const SizedBox(height: 12),
@@ -579,8 +1347,9 @@ class _PdvCatalogPageState extends ConsumerState<PdvCatalogPage> {
                   decoration: const InputDecoration(
                     labelText: 'Valor recebido',
                     hintText: '0,00',
+                    helperText: 'Em branco = valor exato',
                   ),
-                  onChanged: (_) => setState(() {}),
+                  onChanged: (_) => _refreshPdvUi(modalSetState),
                 ),
                 const SizedBox(height: 8),
                 Text('Troco: ${CurrencyUtils.formatMoney(computedChange)}'),
@@ -637,16 +1406,16 @@ class _PdvCatalogPageState extends ConsumerState<PdvCatalogPage> {
                         'O operador valida o pagamento e so depois conclui a venda.',
                       ),
                       onChanged: (value) {
-                        setState(() {
+                        _setPdvState(() {
                           _pixConfirmedManually = value ?? false;
-                        });
+                        }, modalSetState);
                       },
                     ),
                   ],
                 ),
               if (_selectedPaymentMethod == PaymentMethod.note) ...<Widget>[
                 FilledButton.tonalIcon(
-                  onPressed: _pickDueDate,
+                  onPressed: () => _pickDueDate(modalSetState: modalSetState),
                   icon: const Icon(Icons.calendar_month_outlined),
                   label: Text(
                     _selectedDueDate == null
@@ -694,7 +1463,7 @@ class _PdvCatalogPageState extends ConsumerState<PdvCatalogPage> {
             ],
           ),
         ),
-        if (dashboardState != null) ...<Widget>[
+        if (includeRecentSales && dashboardState != null) ...<Widget>[
           const SizedBox(height: 16),
           _buildRecentSalesSection(context, dashboardState),
         ],
@@ -731,8 +1500,9 @@ class _PdvCatalogPageState extends ConsumerState<PdvCatalogPage> {
 
   Widget _buildCashSection(
     BuildContext context,
-    AsyncValue<CashSessionSummary?> cashState,
-  ) {
+    AsyncValue<CashSessionSummary?> cashState, {
+    StateSetter? modalSetState,
+  }) {
     final cashSummary = cashState.asData?.value;
 
     if (cashState.isLoading && cashSummary == null) {
@@ -820,9 +1590,9 @@ class _PdvCatalogPageState extends ConsumerState<PdvCatalogPage> {
             ],
             selected: <CashMovementType>{_selectedMovementType},
             onSelectionChanged: (selection) {
-              setState(() {
+              _setPdvState(() {
                 _selectedMovementType = selection.first;
-              });
+              }, modalSetState);
             },
           ),
           const SizedBox(height: 8),
@@ -1051,7 +1821,11 @@ class _PdvCatalogPageState extends ConsumerState<PdvCatalogPage> {
     try {
       final cart = ref.read(cartNotifierProvider);
       final amountReceived = _selectedPaymentMethod == PaymentMethod.cash
-          ? CurrencyUtils.parseCurrencyToCents(_amountReceivedController.text)
+          ? _amountReceivedController.text.trim().isEmpty
+                ? cart.totalInCents
+                : CurrencyUtils.parseCurrencyToCents(
+                    _amountReceivedController.text,
+                  )
           : cart.totalInCents;
 
       final request = CheckoutRequest(
@@ -1102,7 +1876,17 @@ class _PdvCatalogPageState extends ConsumerState<PdvCatalogPage> {
     }
   }
 
-  Future<void> _pickDueDate() async {
+  void _setPdvState(VoidCallback mutation, StateSetter? modalSetState) {
+    setState(mutation);
+    modalSetState?.call(() {});
+  }
+
+  void _refreshPdvUi(StateSetter? modalSetState) {
+    setState(() {});
+    modalSetState?.call(() {});
+  }
+
+  Future<void> _pickDueDate({StateSetter? modalSetState}) async {
     final now = DateTime.now();
     final picked = await showDatePicker(
       context: context,
@@ -1115,16 +1899,19 @@ class _PdvCatalogPageState extends ConsumerState<PdvCatalogPage> {
       return;
     }
 
-    setState(() {
+    _setPdvState(() {
       _selectedDueDate = DateTime(picked.year, picked.month, picked.day);
-    });
+    }, modalSetState);
   }
 
-  void _fillQuickCustomer(QuickCustomer customer) {
-    setState(() {
+  void _fillQuickCustomer(
+    QuickCustomer customer, {
+    StateSetter? modalSetState,
+  }) {
+    _setPdvState(() {
       _customerNameController.text = customer.name;
       _customerPhoneController.text = customer.phone;
-    });
+    }, modalSetState);
   }
 
   Future<void> _copyPixPayload(String payload) async {
@@ -1267,37 +2054,49 @@ class _ProductCard extends StatelessWidget {
     return Card(
       clipBehavior: Clip.antiAlias,
       child: Padding(
-        padding: const EdgeInsets.all(TatuzinSpacing.md),
+        padding: const EdgeInsets.all(14),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
-            if (hasPromotion)
-              const Padding(
-                padding: EdgeInsets.only(bottom: TatuzinSpacing.xs),
-                child: AppStatusBadge(
-                  label: 'Preco promocional',
-                  tone: AppTone.warning,
-                ),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  if (hasPromotion)
+                    const Padding(
+                      padding: EdgeInsets.only(bottom: 6),
+                      child: AppStatusBadge(
+                        label: 'Preco promocional',
+                        tone: AppTone.warning,
+                      ),
+                    ),
+                  Text(
+                    variant.displayName,
+                    style: Theme.of(context).textTheme.titleMedium,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    variant.subtitle.isNotEmpty
+                        ? variant.subtitle
+                        : variant.categoryName ?? 'Sem categoria',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  if (variant.barcode != null)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 2),
+                      child: Text(
+                        'Codigo: ${variant.barcode}',
+                        style: Theme.of(context).textTheme.bodySmall,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                ],
               ),
-            Text(
-              variant.displayName,
-              style: Theme.of(context).textTheme.titleLarge,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
             ),
-            const SizedBox(height: 8),
-            Text(variant.categoryName ?? 'Sem categoria'),
-            if (variant.subtitle.isNotEmpty)
-              Padding(
-                padding: const EdgeInsets.only(top: 4),
-                child: Text(variant.subtitle),
-              ),
-            if (variant.barcode != null)
-              Padding(
-                padding: const EdgeInsets.only(top: 4),
-                child: Text('Codigo: ${variant.barcode}'),
-              ),
-            const Spacer(),
             if (hasPromotion)
               Text(
                 CurrencyUtils.formatMoney(priceInCents),
@@ -1307,7 +2106,7 @@ class _ProductCard extends StatelessWidget {
               ),
             Text(
               CurrencyUtils.formatMoney(effectivePriceInCents),
-              style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+              style: Theme.of(context).textTheme.titleLarge?.copyWith(
                 color: tokens.tone(AppTone.cash).foreground,
               ),
             ),
